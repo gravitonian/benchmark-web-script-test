@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xsi:schemaLocation="http://www.springframework.org/schema/beans
+          http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
+
+    <!--
+        alfresco-benchmark-web-script-test: Invoke an Alfresco Repository Web Script
+     -->
+         
+    <!-- Import any application contexts for test runs -->
+    <import resource="classpath:config/spring/test-common-context.xml" />
+
+    <!--                 -->
+    <!-- Reporting       -->
+    <!--                 -->
+
+    <!-- The CompletionEstimator looking at the Web Script invocation count results -->
+    <bean id="completionEstimator.webScriptInvocationCount" class="org.alfresco.bm.test.EventCountCompletionEstimator">
+        <constructor-arg name="eventService" ref="eventService" />
+        <constructor-arg name="resultService" ref="resultService" />
+        <constructor-arg name="eventName" value="webScriptInvocation" />
+        <constructor-arg name="eventCount" value="${wstest.numberOfInvocations}" />
+    </bean>
+
+    <!-- Override the default estimator to use the desired estimators -->
+    <bean id="completionEstimator" class="org.alfresco.bm.test.CompoundCompletionEstimator">
+        <constructor-arg name="eventService" ref="eventService" />
+        <constructor-arg name="resultService" ref="resultService" />
+        <constructor-arg name="estimators">
+            <list>
+                <ref bean="completionEstimator.elapsedTime" />
+                <ref bean="completionEstimator.webScriptInvocationCount" />
+            </list>
+        </constructor-arg>
+    </bean>
+
+    <!--                  -->
+    <!-- Support Services -->
+    <!--                  -->
+
+    <bean id="userDataService" class="org.alfresco.bm.user.UserDataServiceImpl">
+        <constructor-arg name="db" ref="testMongoDB" />
+        <constructor-arg name="collection" value="${users.collection.name}" />
+    </bean>
+
+    <bean id="authenticationDetailsProvider" class="org.alfresco.bm.http.UserDataAutheticationDetailsProvider">
+        <constructor-arg name="userDataService" ref="userDataService" />
+        <constructor-arg name="adminUserName" value="${alfresco.adminUser}" />
+        <constructor-arg name="adminPassword" value="${alfresco.adminPwd}" />
+    </bean>
+
+    <!-- Shared HTTP-Client instance provider to have better performance -->
+    <bean id="httpClientProvider" class="org.alfresco.http.SharedHttpClientProvider">
+        <constructor-arg name="maxNumberOfConnections" value="${http.connection.max}" />
+        <constructor-arg name="connectionTimeoutMs" value="${http.connection.timeoutMs}" />
+        <constructor-arg name="socketTimeoutMs" value="${http.socket.timeoutMs}" />
+        <constructor-arg name="socketTtlMs" value="${http.socket.ttlMs}" />
+    </bean>
+
+    <!--                 -->
+    <!-- DAO             -->
+    <!--                 -->
+
+    <bean id="webScriptInvocationDataDAO" class="org.alfresco.bm.data.WebScriptInvocationDataDAO" >
+        <constructor-arg name="db" ref="testMongoDB" />
+        <constructor-arg name="collection" value="${webscript.invocations.collection.name}" />
+    </bean>
+
+    <!--                 -->
+    <!-- EventProcessors -->
+    <!--                 -->
+
+    <!-- The 'start' event is reserved, so we need to rename and redirect to scheduleWebScriptInvocations -->
+    <bean id="event.start" class="org.alfresco.bm.event.RenameEventProcessor" parent="event.base" >
+        <constructor-arg name="outputEventName" value="scheduleWebScriptInvocations" />
+        <property name="chart" value="false"/>
+    </bean>
+
+    <bean id="event.scheduleWebScriptInvocations" class="org.alfresco.bm.invokewebscript.ScheduleWebScriptInvocationsEventProcessor" parent="event.base" >
+        <constructor-arg name="userDataService" ref="userDataService" />
+        <constructor-arg name="webScriptInvocationDataDAO" ref="webScriptInvocationDataDAO" />
+        <constructor-arg name="testRunFqn" value="${testRunFqn}" />
+        <constructor-arg name="numberOfWebScriptInvocations" value="${wstest.numberOfInvocations}" />
+        <constructor-arg name="timeBetweenWebScriptInvocations" value="${wstest.timeBetweenInvocations}" />
+        <constructor-arg name="webScriptMessagePattern" value="${wstest.messageparam}" />
+        <property name="batchSize" value="${wstest.scheduleBatchSize}" />
+        <property name="chart" value="true" />
+    </bean>
+
+    <bean id="producer.webScriptInvocation" class="org.alfresco.bm.event.producer.RedirectEventProducer" parent="producer.base" >
+        <constructor-arg name="newEventName" value="invokeWebScript" />
+        <constructor-arg name="delay" value="1" />
+    </bean>
+
+    <bean id="event.invokeWebScript" class="org.alfresco.bm.invokewebscript.InvokeWebScriptEventProcessor" parent="event.base" >
+        <constructor-arg name="httpClientProvider" ref="httpClientProvider" />
+        <constructor-arg name="authenticationDetailsProvider" ref="authenticationDetailsProvider" />
+        <constructor-arg name="baseUrl" value="${alfresco.url}" />
+        <constructor-arg name="webScriptInvocationDataDAO" ref="webScriptInvocationDataDAO" />
+        <constructor-arg name="userDataService" ref="userDataService" />
+        <property name="chart" value="true" />
+    </bean>
+
+    <bean id="producer.webScriptInvocationDone" class="org.alfresco.bm.event.producer.TerminateEventProducer" parent="producer.base" />
+    
+</beans>
